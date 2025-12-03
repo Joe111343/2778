@@ -1,0 +1,154 @@
+<!DOCTYPE html><html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<title>UTAU CV 平假名聲庫生成器</title>
+<style>
+body { font-family: sans-serif; padding: 20px; line-height: 1.6; }
+button { margin: 6px 0; padding: 6px 12px; }
+#fileList li { margin-bottom: 4px; }
+label { display: block; margin-top: 10px; }
+.highlight {
+    background: #f0f8ff;
+    padding: 10px;
+    border-left: 4px solid #00a;
+    margin-bottom: 15px;
+}
+</style>
+</head>
+<body><h2>UTAU CV 平假名聲庫生成器（超新手教學版）</h2><div class="highlight">
+<b>使用方式：</b><br>
+1. 按下「開始錄音」錄下一個音<br>
+2. 按「停止錄音」完成該音<br>
+3. 會自動跳下一個音，直到全部錄完<br>
+4. 最後按「生成 ZIP」即可下載整個 UTAU 聲庫<br>
+</div><label>角色名稱: <input type="text" id="charName" value="わたしのうたね"></label>
+<label>子音裁切(ms): <input type="number" id="consonant" value="80"></label>
+<label>前置(preutter): <input type="number" id="preutter" value="20"></label>
+<label>重疊(overlap): <input type="number" id="overlap" value="15"></label>
+
+<hr><h3>錄音控制</h3>
+<button id="recordBtn">開始錄音</button>
+<button id="stopBtn" disabled>停止錄音</button>
+<p id="statusText" style="font-weight:bold;color:#a00;"></p><ul id="fileList"></ul><button id="generateBtn">生成 ZIP</button>
+<a id="downloadLink" style="display:none">下載 ZIP</a>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.11.0/jszip.min.js"></script><script>
+// ★★★ CV 平假名音素 ★★★
+const notes = [
+    "あ","い","う","え","お",
+    "か","き","く","け","こ",
+    "さ","し","す","せ","そ",
+    "た","ち","つ","て","と",
+    "な","に","ぬ","ね","の",
+    "は","ひ","ふ","へ","ほ",
+    "ま","み","む","め","も",
+    "や","ゆ","よ",
+    "ら","り","る","れ","ろ",
+    "わ","を","ん"
+];
+
+let currentNoteIndex = 0;
+let recordedFiles = [];
+let mediaRecorder;
+let audioChunks = [];
+
+const recordBtn = document.getElementById('recordBtn');
+const stopBtn = document.getElementById('stopBtn');
+const fileList = document.getElementById('fileList');
+const generateBtn = document.getElementById('generateBtn');
+const downloadLink = document.getElementById('downloadLink');
+const statusText = document.getElementById('statusText');
+
+const consonantInput = document.getElementById('consonant');
+const preutterInput = document.getElementById('preutter');
+const overlapInput = document.getElementById('overlap');
+const charNameInput = document.getElementById('charName');
+
+// === 開始錄音 ===
+recordBtn.onclick = async () => {
+    if(currentNoteIndex >= notes.length) { 
+        alert("所有音素都錄完啦！");
+        return;
+    }
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    mediaRecorder = new MediaRecorder(stream);
+    audioChunks = [];
+
+    mediaRecorder.ondataavailable = e => audioChunks.push(e.data);
+
+    mediaRecorder.onstop = async () => {
+        const blob = new Blob(audioChunks, { type: 'audio/wav' });
+        const fileName = notes[currentNoteIndex];
+        const file = new File([blob], fileName + ".wav", { type: "audio/wav" });
+
+        recordedFiles.push(file);
+
+        const li = document.createElement('li');
+        li.textContent = file.name;
+        fileList.appendChild(li);
+
+        currentNoteIndex++;
+
+        if(currentNoteIndex < notes.length){
+            statusText.textContent = "請錄音下一個音：" + notes[currentNoteIndex];
+        } else {
+            statusText.textContent = "全部完成！";
+            alert("所有音素都已錄製完畢！");
+        }
+    };
+
+    mediaRecorder.start();
+    recordBtn.disabled = true;
+    stopBtn.disabled = false;
+
+    statusText.textContent = "錄音中：「" + notes[currentNoteIndex] + "」 請發音～";
+};
+
+// === 停止錄音 ===
+stopBtn.onclick = () => {
+    mediaRecorder.stop();
+    recordBtn.disabled = false;
+    stopBtn.disabled = true;
+};
+
+// === 生成 ZIP 包含 oto.ini ===
+generateBtn.onclick = async () => {
+    if(recordedFiles.length === 0){ 
+        alert("你還沒有錄任何音喔！");
+        return;
+    }
+
+    let zip = new JSZip();
+    let otoLines = [];
+
+    const consonant = parseInt(consonantInput.value);
+    const preutter = parseInt(preutterInput.value);
+    const overlap = parseInt(overlapInput.value);
+
+    for(const f of recordedFiles){
+        const arrayBuffer = await f.arrayBuffer();
+        zip.file(f.name, arrayBuffer);
+
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        const buf = await audioCtx.decodeAudioData(arrayBuffer);
+        const lengthMs = buf.duration * 1000;
+
+        const alias = f.name.replace(/\.[^/.]+$/, "");
+        const cutoff = Math.max(5, lengthMs - consonant);
+
+        otoLines.push(
+            `${f.name}=${alias},0,${consonant},${cutoff},${preutter},${overlap}`
+        );
+    }
+
+    zip.file("oto.ini", otoLines.join("\n"));
+    zip.file("character.txt", "name=" + charNameInput.value);
+
+    const blob = await zip.generateAsync({type:"blob"});
+    downloadLink.href = URL.createObjectURL(blob);
+    downloadLink.download = charNameInput.value + "_voicebank.zip";
+    downloadLink.style.display = "inline";
+    downloadLink.textContent = "下載 ZIP（已完成聲庫）";
+};
+</script></body>
+</html>
